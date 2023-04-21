@@ -1,3 +1,20 @@
 <resources>
-    <string name="app_name">IndoorNavigation</string>
+    <string name="app_name">IndoorNavigation_lst</string>
+    <string name="demo_title_main">刘士通室内导航 V%1$s</string>
+
+    <string name="demo_title_constraint">导航路径约束</string>
+    <string name="demo_title_main_constraint">导航路径约束 - FMNavigationConstraint</string>
+    <string name="demo_title_recalc">路径偏移重新规划</string>
+    <string name="demo_title_main_recalc">路径偏移重新规划 - FMNavigationRecalc</string>
+    <string name="demo_title_first_person">第一人称导航</string>
+    <string name="demo_title_main_first_person">第一人称导航 - FMNavigationFirstPerson</string>
+    <string name="demo_title_third_person">第三人称导航</string>
+    <string name="demo_title_main_third_person">第三人称导航 - FMNavigationThirdPerson</string>
+    <string name="demo_title_application">导航实例</string>
+    <string name="demo_title_main_application">导航实例 - FMNavigationApplication</string>
+
+    <string name="btn_start_navigation">开始导航</string>
+    <string name="label_walk_format">距终点 %1$.2f米\t\t时间%2$d分钟\n路线提示：%3$s</string>
+    <string name="language_zh">中文导航</string>
+    <string name="language_en">英文导航</string>
 </resources>

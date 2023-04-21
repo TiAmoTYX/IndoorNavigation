@@ -9,9 +9,13 @@ import android.graphics.BitmapFactory;
 import android.os.Bundle;
 
 import android.view.View;
+import android.widget.Button;
+import android.widget.TextView;
 
 
+import com.example.indoornavigation.utils.ConvertUtils;
 import com.example.indoornavigation.utils.FileUtils;
+import com.example.indoornavigation.utils.ViewHelper;
 import com.fengmap.android.FMDevice;
 import com.fengmap.android.FMErrorMsg;
 
@@ -23,6 +27,7 @@ import com.fengmap.android.analysis.navi.FMPointOption;
 import com.fengmap.android.analysis.navi.FMSimulateNavigation;
 import com.fengmap.android.analysis.navi.OnFMNavigationListener;
 import com.fengmap.android.data.OnFMDownloadProgressListener;
+import com.fengmap.android.exception.FMObjectException;
 import com.fengmap.android.map.FMMap;
 import com.fengmap.android.map.FMMapUpgradeInfo;
 import com.fengmap.android.map.FMMapView;
@@ -31,13 +36,19 @@ import com.fengmap.android.map.event.OnFMMapInitListener;
 import com.fengmap.android.map.event.OnFMSwitchGroupListener;
 import com.fengmap.android.map.geometry.FMGeoCoord;
 import com.fengmap.android.map.geometry.FMMapCoord;
+import com.fengmap.android.map.layer.FMLocationLayer;
+import com.fengmap.android.map.marker.FMLocationMarker;
 import com.fengmap.android.utils.FMLog;
 import com.fengmap.android.widget.FMFloorControllerComponent;
 import com.fengmap.android.widget.FMMultiFloorControllerButton;
+import com.fengmap.android.widget.FMSwitchFloorComponent;
 import com.fengmap.android.widget.FMTextButton;
+import com.iflytek.cloud.SpeechConstant;
+import com.iflytek.cloud.SpeechSynthesizer;
+import java.io.FileNotFoundException;
 
 
-public class MainActivity extends Activity implements OnFMNavigationListener,OnFMMapInitListener, OnFMSwitchGroupListener{
+public class MainActivity extends Activity implements View.OnClickListener,OnFMNavigationListener,OnFMMapInitListener, OnFMSwitchGroupListener{
     //地图
     FMMap mFMMap;
     private FMFloorControllerComponent mFloorComponent;
@@ -73,6 +84,20 @@ public class MainActivity extends Activity implements OnFMNavigationListener,OnF
     private boolean mHasFollowed = true;
     // 总共距离
     private double mTotalDistance;
+    //导航分析器
+    private FMNaviAnalyser mNaviAnalyser;
+    // 楼层切换控件
+    private FMSwitchFloorComponent mSwitchFloorComponent;
+    // 上一次文字描述
+    private String mLastDescription;
+    private SpeechSynthesizer mTts;
+    //语言
+    private boolean language = true;
+    // 约束过的定位标注
+    private FMLocationMarker mHandledMarker;
+    // 定位图层
+    protected FMLocationLayer mLocationLayer;
+    private Button start_navigation;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -83,6 +108,23 @@ public class MainActivity extends Activity implements OnFMNavigationListener,OnF
         String bid = "1627576819222937601";             //地图id
         mFMMap.openMapById(bid, true);          //打开地图
         openMapByPath();
+        createSynthesizer();
+        start_navigation = (Button)findViewById(R.id.btn_start_navigation);
+        start_navigation.setOnClickListener(new View.OnClickListener() {
+            //开始导航按钮
+            @Override
+            public void onClick(View v) {
+                switch (v.getId()) {
+                    case R.id.btn_start_navigation:
+                        if (isRouteCalculated) {
+                            startNavigation();
+                        }
+                        break;
+                    default:
+                        break;
+                }
+            }
+        });
     }
 
 
@@ -167,6 +209,10 @@ public class MainActivity extends Activity implements OnFMNavigationListener,OnF
         if (mFMMap != null) {
             mFMMap.onDestroy();
         }
+        // 释放资源
+        mNavigation.stop();
+        mNavigation.clear();
+        mNavigation.release();
         super.onBackPressed();
     }
 
@@ -185,10 +231,8 @@ public class MainActivity extends Activity implements OnFMNavigationListener,OnF
         }
         // 创建模拟导航对象
         mNavigation = new FMSimulateNavigation(mFMMap);
-        // 创建真实导航对象
-        // mNavigation = new FMActualNavigation(mFMMap);
         // 设置导航文字语种，目前支持中文英文两种("zh"，"en")
-        // mNavigation.setNaviLanguage(this, "en");
+         mNavigation.setNaviLanguage(this, "CH");
         // 设置是否启用走过导航线变化,默认开启
         // mNavigation. setNaviAcrossChange(true);
         // 创建导航配置对象
@@ -203,7 +247,26 @@ public class MainActivity extends Activity implements OnFMNavigationListener,OnF
         mNaviOption.setZoomLevel(NAVI_ZOOM_LEVEL, false);
         // 设置配置
         mNavigation.setNaviOption(mNaviOption);
+        // 总长
+        mTotalDistance = mNavigation.getSceneRouteLength();
+        isMapLoaded = true;
         initNavi();
+        //得到路径分析器
+        try {
+            mNaviAnalyser = FMNaviAnalyser.getFMNaviAnalyserByPath(path);
+        } catch (FileNotFoundException pE) {
+            pE.printStackTrace();
+        } catch (FMObjectException pE) {
+            pE.printStackTrace();
+        }
+
+    }
+
+
+    public void startNavigation() {
+        FMSimulateNavigation simulateNavigation = (FMSimulateNavigation) mNavigation;
+        // 3米每秒。
+        simulateNavigation.simulate(3.0f);
     }
 
     private void initNavi() {
@@ -231,6 +294,8 @@ public class MainActivity extends Activity implements OnFMNavigationListener,OnF
         mTotalDistance = mNavigation.getSceneRouteLength();
         isMapLoaded = true;
     }
+
+
 
     //导航
     void analyzeNavigation(FMGeoCoord startPt, FMGeoCoord endPt) {
@@ -291,6 +356,76 @@ public class MainActivity extends Activity implements OnFMNavigationListener,OnF
         mFloorComponent.setFloorDataFromFMMapInfo(mFMMap.getFMMapInfo(), groupId);
         mMapView.addComponent(mFloorComponent, 10, 400);//添加楼层控件并设置位置
     }
+    /**
+     * 更新约束定位点
+     *
+     * @param coord 坐标
+     */
+    private void updateHandledMarker(FMGeoCoord coord, float angle) {
+        if (mHandledMarker == null) {
+            mHandledMarker = ViewHelper.buildLocationMarker(coord.getGroupId(), coord.getCoord(), angle);
+            mLocationLayer.addMarker(mHandledMarker);
+        } else {
+            mHandledMarker.updateAngleAndPosition(coord.getGroupId(), angle, coord.getCoord());
+        }
+    }
+    //更新楼层
+    public void updateLocateGroupView() {
+        int groupSize = mFMMap.getFMMapInfo().getGroupSize();
+        int position = groupSize - mFMMap.getFocusGroupId();
+        mSwitchFloorComponent.setSelected(position);
+    }
+
+    /**
+     * 更新行走距离和文字导航。
+     */
+    private void updateWalkRouteLine(FMNavigationInfo info) {
+        // 剩余时间
+        int timeByWalk = ConvertUtils.getTimeByWalk(info.getSurplusDistance());
+
+        // 导航路段描述
+        String description = info.getNaviText();
+
+        String viewText = getResources().getString(R.string.label_walk_format, info.getSurplusDistance(),
+                timeByWalk, description);
+
+        ViewHelper.setViewText(MainActivity.this, R.id.txt_info, viewText);
+
+        if (!description.equals(mLastDescription)) {
+            mLastDescription = description;
+            startSpeaking(mLastDescription);
+        }
+    }
+
+    private void updateNavigationOption() {
+        mNaviOption.setFollowAngle(mIsFirstView);
+        mNaviOption.setFollowPosition(mHasFollowed);
+    }
+
+
+    /**
+     * 创建语音合成SpeechSynthesizer对象
+     */
+    private void createSynthesizer() {
+        //1.创建 SpeechSynthesizer 对象, 第二个参数： 本地合成时传 InitListener
+        mTts = SpeechSynthesizer.createSynthesizer(this, null);
+        //2.合成参数设置，详见《 MSC Reference Manual》 SpeechSynthesizer 类
+        //设置发音人（更多在线发音人，用户可参见科大讯飞附录13.2
+        //mTts.setParameter(SpeechConstant.VOICE_NAME, "xiaoyan"); //设置发音人
+        //mTts.setParameter(SpeechConstant.SPEED, "100");//设置语速
+        //mTts.setParameter(SpeechConstant.VOLUME, "80");//设置音量，范围 0~100
+        //mTts.setParameter(SpeechConstant.ENGINE_TYPE, SpeechConstant.TYPE_CLOUD); //设置云端
+    }
+
+    /**
+     * 开始语音合成
+     *
+     * @param inputStr 语音合成文字
+     */
+    private void startSpeaking(String inputStr) {
+        mTts.stopSpeaking();
+        mTts.startSpeaking(inputStr, null);
+    }
 
     /**
      * 地图加载失败回调事件
@@ -338,17 +473,52 @@ public class MainActivity extends Activity implements OnFMNavigationListener,OnF
 
 
     @Override
-    public void onCrossGroupId(int i, int i1) {
-
+    public void onCrossGroupId(final int lastGroupId, final int currGroupId) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                mFMMap.setFocusByGroupId(currGroupId, null);
+                updateLocateGroupView();
+            }
+        });
     }
 
+    //路径行走
     @Override
-    public void onWalking(FMNavigationInfo fmNavigationInfo) {
-
+    public void onWalking(final FMNavigationInfo navigationInfo) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                // 更新定位标志物
+                //updateHandledMarker(navigationInfo.getPosition(), navigationInfo.getAngle());
+                // 更新路段显示信息
+                //updateWalkRouteLine(navigationInfo);
+                // 更新导航配置
+                //updateNavigationOption();
+            }
+        });
     }
 
     @Override
     public void onComplete() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                String description = "到达目的地";
+                if (!language) {
+                    description = "arrived";
+                }
+                String info = getResources().getString(R.string.label_walk_format, 0f,
+                        0, description);
+                ViewHelper.setViewText(MainActivity.this, R.id.txt_info, info);
+
+                startSpeaking(description);
+            }
+        });
+    }
+
+    @Override
+    public void onClick(View v) {
 
     }
 }
