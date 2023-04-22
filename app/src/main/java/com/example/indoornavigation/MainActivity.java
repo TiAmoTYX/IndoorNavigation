@@ -9,7 +9,10 @@ import android.graphics.BitmapFactory;
 import android.os.Bundle;
 
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.RelativeLayout;
 import android.widget.TextView;
 
 
@@ -109,6 +112,10 @@ public class MainActivity extends Activity implements View.OnClickListener,OnFMN
         mFMMap.openMapById(bid, true);          //打开地图
         openMapByPath();
         createSynthesizer();
+        //定位层
+        mLocationLayer = mFMMap.getFMLayerProxy().getFMLocationLayer();
+        mFMMap.addLayer(mLocationLayer);
+
         start_navigation = (Button)findViewById(R.id.btn_start_navigation);
         start_navigation.setOnClickListener(new View.OnClickListener() {
             //开始导航按钮
@@ -206,13 +213,18 @@ public class MainActivity extends Activity implements View.OnClickListener,OnFMN
 
     @Override
     public void onBackPressed () {
-        if (mFMMap != null) {
-            mFMMap.onDestroy();
+        if (!isMapLoaded)
+            return;
+
+        if (mTts != null) {
+            mTts.destroy();
         }
+
         // 释放资源
         mNavigation.stop();
         mNavigation.clear();
         mNavigation.release();
+
         super.onBackPressed();
     }
 
@@ -259,16 +271,43 @@ public class MainActivity extends Activity implements View.OnClickListener,OnFMN
         } catch (FMObjectException pE) {
             pE.printStackTrace();
         }
+        //切换楼层
+        if (mSwitchFloorComponent == null) {
+            initSwitchFloorComponent();
+        }
 
     }
+    /**
+     * 楼层切换控件初始化
+     */
+    private void initSwitchFloorComponent() {
+        mSwitchFloorComponent = new FMSwitchFloorComponent(this);
+        //最多显示6个
+        mSwitchFloorComponent.setMaxItemCount(6);
+        mSwitchFloorComponent.setEnabled(false);
+        mSwitchFloorComponent.setOnFMSwitchFloorComponentListener(new FMSwitchFloorComponent.OnFMSwitchFloorComponentListener() {
+            @Override
+            public boolean onItemSelected(int groupId, String floorName) {
+                mFMMap.setFocusByGroupId(groupId, null);
+                return true;
+            }
+        });
 
+        mSwitchFloorComponent.setFloorDataFromFMMapInfo(mFMMap.getFMMapInfo(), mFMMap.getFocusGroupId());
 
-    public void startNavigation() {
-        FMSimulateNavigation simulateNavigation = (FMSimulateNavigation) mNavigation;
-        // 3米每秒。
-        simulateNavigation.simulate(3.0f);
+        addSwitchFloorComponent();
+    }
+    /**
+     * 添加楼层切换按钮
+     */
+    private void addSwitchFloorComponent() {
+        RelativeLayout.LayoutParams lp = new RelativeLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT);
+        FrameLayout viewGroup = (FrameLayout) findViewById(R.id.layout_group_control);
+        viewGroup.addView(mSwitchFloorComponent, lp);
     }
 
+    //模拟导航配置
     private void initNavi() {
         // 创建模拟导航对象
         mNavigation = new FMSimulateNavigation(mFMMap);
@@ -295,7 +334,12 @@ public class MainActivity extends Activity implements View.OnClickListener,OnFMN
         isMapLoaded = true;
     }
 
-
+    //开始模拟导航
+    public void startNavigation() {
+        FMSimulateNavigation simulateNavigation = (FMSimulateNavigation) mNavigation;
+        // 3米每秒。
+        simulateNavigation.simulate(3.0f);
+    }
 
     //导航
     void analyzeNavigation(FMGeoCoord startPt, FMGeoCoord endPt) {
@@ -369,6 +413,7 @@ public class MainActivity extends Activity implements View.OnClickListener,OnFMN
             mHandledMarker.updateAngleAndPosition(coord.getGroupId(), angle, coord.getCoord());
         }
     }
+
     //更新楼层
     public void updateLocateGroupView() {
         int groupSize = mFMMap.getFMMapInfo().getGroupSize();
@@ -426,6 +471,7 @@ public class MainActivity extends Activity implements View.OnClickListener,OnFMN
         mTts.stopSpeaking();
         mTts.startSpeaking(inputStr, null);
     }
+
 
     /**
      * 地图加载失败回调事件
@@ -490,7 +536,7 @@ public class MainActivity extends Activity implements View.OnClickListener,OnFMN
             @Override
             public void run() {
                 // 更新定位标志物
-                //updateHandledMarker(navigationInfo.getPosition(), navigationInfo.getAngle());
+                updateHandledMarker(navigationInfo.getPosition(), navigationInfo.getAngle());
                 // 更新路段显示信息
                 //updateWalkRouteLine(navigationInfo);
                 // 更新导航配置
